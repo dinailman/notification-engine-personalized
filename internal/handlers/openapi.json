@@ -1,0 +1,23 @@
+{
+  "openapi": "3.0.3",
+  "info": {"title": "Personalized Notification Engine", "version": "1.1.0", "description": "Rule-based personalized notification service for user engagement."},
+  "servers": [{"url": "http://localhost:8083"}],
+  "security": [{"apiKeyAuth": []}],
+  "paths": {
+    "/users": {"post": {"summary": "Create a user and optional preferences", "responses": {"201": {"description": "Created"}, "400": {"description": "Validation error"}, "409": {"description": "Duplicate user"}}}},
+    "/users/{id}": {"get": {"summary": "Get a user", "responses": {"200": {"description": "User"}, "404": {"description": "Not found"}}}, "patch": {"summary": "Update a user", "responses": {"200": {"description": "Updated"}}}},
+    "/users/{id}/preferences": {"get": {"summary": "List preferences", "responses": {"200": {"description": "Preferences"}}}, "put": {"summary": "Replace preferences", "responses": {"200": {"description": "Preferences"}}}},
+    "/users/{id}/rules": {"get": {"summary": "List user rules", "responses": {"200": {"description": "Rules"}}}, "post": {"summary": "Create a notification rule", "responses": {"201": {"description": "Created"}}}},
+    "/rules/{id}": {"patch": {"summary": "Update a rule", "responses": {"200": {"description": "Updated"}}}, "delete": {"summary": "Delete a rule", "responses": {"204": {"description": "Deleted"}}}},
+    "/events": {"post": {"summary": "Ingest a user activity event", "responses": {"202": {"description": "Accepted"}, "409": {"description": "Duplicate or invalid event"}}}},
+    "/users/{id}/events": {"get": {"summary": "List user events", "responses": {"200": {"description": "Events"}}}},
+    "/users/{id}/notifications": {"get": {"summary": "List user notifications", "responses": {"200": {"description": "Notifications"}}}},
+    "/notifications/{id}": {"get": {"summary": "Get a notification", "responses": {"200": {"description": "Notification"}}}},
+    "/notifications/{id}/logs": {"get": {"summary": "List delivery attempts", "responses": {"200": {"description": "Attempt logs"}}}},
+    "/analytics/notifications": {"get": {"summary": "Aggregate sent notifications", "responses": {"200": {"description": "Analytics"}}}},
+    "/healthz": {"get": {"summary": "Health check", "security": [], "responses": {"200": {"description": "Healthy"}, "503": {"description": "Unhealthy"}}}},
+    "/metrics": {"get": {"summary": "Prometheus metrics", "security": [], "responses": {"200": {"description": "Metrics"}}}},
+    "/openapi.json": {"get": {"summary": "OpenAPI specification", "security": [], "responses": {"200": {"description": "OpenAPI document"}}}}
+  },
+  "components": {"securitySchemes": {"apiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}}}
+}

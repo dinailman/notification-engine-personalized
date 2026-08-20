@@ -1,0 +1,61 @@
+openapi: 3.0.3
+info:
+  title: Personalized Notification Engine
+  version: 1.0.0
+  description: Rule-based personalized notification service for user engagement.
+servers:
+  - url: http://localhost:8083
+security:
+  - apiKeyAuth: []
+paths:
+  /users:
+    post:
+      summary: Create a user and optional preferences
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UserRequest'}}}}
+      responses: {'201': {description: Created}, '400': {description: Validation error}, '409': {description: Duplicate user}}
+  /users/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get: {summary: Get a user, responses: {'200': {description: User}, '404': {description: Not found}}}
+    patch: {summary: Update a user, requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UserUpdate'}}}}, responses: {'200': {description: Updated}}}
+  /users/{id}/preferences:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get: {summary: List preferences, responses: {'200': {description: Preferences}}}
+    put: {summary: Replace preferences, requestBody: {required: true, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Preference'}}}}}, responses: {'200': {description: Preferences}}}
+  /users/{id}/rules:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get: {summary: List user rules, responses: {'200': {description: Rules}}}
+    post: {summary: Create a notification rule, requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RuleRequest'}}}}, responses: {'201': {description: Created}}}
+  /rules/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    patch: {summary: Update a rule, responses: {'200': {description: Updated}}}
+    delete: {summary: Delete a rule, responses: {'204': {description: Deleted}}}
+  /events:
+    post: {summary: Ingest a user activity event, requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EventRequest'}}}}, responses: {'202': {description: Accepted}, '409': {description: Duplicate or invalid event}}}
+  /users/{id}/events:
+    get: {summary: List user events, responses: {'200': {description: Events}}}
+  /users/{id}/notifications:
+    get: {summary: List user notifications, responses: {'200': {description: Notifications}}}
+  /notifications/{id}:
+    get: {summary: Get a notification, responses: {'200': {description: Notification}}}
+  /notifications/{id}/logs:
+    get: {summary: List delivery attempts, responses: {'200': {description: Attempt logs}}}
+  /analytics/notifications:
+    get:
+      summary: Aggregate sent notifications
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+        - {name: user_id, in: query, schema: {type: string, format: uuid}}
+        - {name: channel, in: query, schema: {type: string, enum: [email, push, in_app]}}
+      responses: {'200': {description: Analytics}}
+  /healthz: {get: {summary: Health check, security: [], responses: {'200': {description: Healthy}, '503': {description: Unhealthy}}}}
+  /metrics: {get: {summary: Prometheus metrics, security: [], responses: {'200': {description: Metrics}}}}
+components:
+  securitySchemes:
+    apiKeyAuth: {type: apiKey, in: header, name: X-API-Key}
+  schemas:
+    UserRequest: {type: object, required: [email, name], additionalProperties: false, properties: {email: {type: string, format: email}, name: {type: string}, timezone: {type: string, default: UTC}, preferences: {type: array, items: {$ref: '#/components/schemas/Preference'}}}}
+    UserUpdate: {type: object, required: [name, timezone], additionalProperties: false, properties: {name: {type: string}, timezone: {type: string}, active: {type: boolean}}}
+    Preference: {type: object, required: [channel, frequency, enabled], additionalProperties: false, properties: {channel: {type: string, enum: [email, push, in_app]}, frequency: {type: string, enum: [daily, weekly]}, enabled: {type: boolean}}}
+    RuleRequest: {type: object, required: [name, trigger_type, channel, subject_template, body_template], additionalProperties: false, properties: {name: {type: string}, trigger_type: {type: string, enum: [scheduled, event]}, event_type: {type: string}, scheduled_time: {type: string, pattern: '^\\d{2}:\\d{2}$'}, frequency: {type: string, enum: [daily, weekly]}, channel: {type: string, enum: [email, push, in_app]}, subject_template: {type: string}, body_template: {type: string}, enabled: {type: boolean}}}
+    EventRequest: {type: object, required: [user_id, event_type], additionalProperties: false, properties: {user_id: {type: string, format: uuid}, event_type: {type: string}, external_id: {type: string}, payload: {type: object}, occurred_at: {type: string, format: date-time}}}
