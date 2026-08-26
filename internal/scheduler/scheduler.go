@@ -22,22 +22,29 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	s.tick(ctx)
+	// Each tick claims the window since the previous one, so a rule whose local firing
+	// time lands between two ticks is still picked up. The first window covers the
+	// interval leading up to startup rather than starting empty.
+	since := time.Now().UTC().Add(-interval)
+	since = s.tick(ctx, since)
 	for {
 		select {
 		case <-ticker.C:
-			s.tick(ctx)
+			since = s.tick(ctx, since)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (s *Scheduler) tick(ctx context.Context) {
-	ids, err := s.Repo.CreateScheduled(ctx, time.Now().UTC())
+// tick evaluates the window (since, now] and returns the point the next window starts
+// from. A failed tick returns since unchanged so the window is retried rather than lost.
+func (s *Scheduler) tick(ctx context.Context, since time.Time) time.Time {
+	now := time.Now().UTC()
+	ids, err := s.Repo.CreateScheduled(ctx, since, now)
 	if err != nil {
 		s.Logger.Error("schedule notifications failed", "error", err)
-		return
+		return since
 	}
 	for _, id := range ids {
 		if err := s.Queue.Enqueue(ctx, id); err != nil {
@@ -47,4 +54,5 @@ func (s *Scheduler) tick(ctx context.Context) {
 	if len(ids) > 0 {
 		s.Logger.Info("scheduled notifications", "count", len(ids))
 	}
+	return now
 }

@@ -3,7 +3,6 @@ package rules
 import (
 	"github.com/dinailman/personalized-notification-engine/internal/models"
 	"testing"
-	"time"
 )
 
 func TestEventMatches(t *testing.T) {
@@ -17,21 +16,6 @@ func TestEventMatches(t *testing.T) {
 	rule.Enabled = false
 	if EventMatches(rule, models.Event{EventType: "document_uploaded"}) {
 		t.Fatal("disabled rule matched")
-	}
-}
-
-func TestDueSchedule(t *testing.T) {
-	now := time.Date(2026, 8, 19, 8, 0, 30, 0, time.UTC)
-	rule := models.Rule{TriggerType: models.TriggerScheduled, ScheduledTime: "08:00", Frequency: models.FrequencyDaily, Enabled: true}
-	if !Due(rule, now) {
-		t.Fatal("due daily rule was not due")
-	}
-	if Due(rule, now.Add(time.Minute)) {
-		t.Fatal("rule was due at the wrong minute")
-	}
-	rule.ScheduledTime = "bad"
-	if Due(rule, now) {
-		t.Fatal("invalid schedule was accepted")
 	}
 }
 

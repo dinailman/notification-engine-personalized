@@ -23,7 +23,7 @@ Redis carries notification IDs rather than full payloads. PostgreSQL owns users,
 - User management with timezone and active state
 - Email, push, and in-app preferences
 - Daily and weekly frequencies
-- Scheduled reminder rules
+- Scheduled reminder rules evaluated in each user's timezone, including DST transitions
 - Event-driven rules such as `task_completed` or `document_uploaded`
 - Idempotent event ingestion using `external_id`
 - Redis-backed notification queue
@@ -129,7 +129,7 @@ curl -X POST http://localhost:8083/users/{user_id}/rules \
   }'
 ```
 
-The scheduler evaluates due rules every ten seconds. Scheduled times are currently evaluated in UTC; the user timezone is stored for timezone-aware scheduling as a future enhancement.
+The scheduler evaluates due rules every ten seconds. Each tick claims the window since the previous tick in each user's own timezone, so this rule fires at 20:00 local time rather than 20:00 UTC. Notifications are unique per rule per user-local day.
 
 ## API
 
@@ -175,6 +175,15 @@ go vet ./...
 go build ./cmd/api
 go build ./cmd/worker
 docker compose config
+```
+
+Run the PostgreSQL-backed repository tests. They are skipped unless `TEST_DATABASE_URL` is set, and they drop and re-apply the schema, so point them at a throwaway database:
+
+```bash
+docker compose up -d postgres
+docker compose exec -T postgres psql -U postgres -c 'CREATE DATABASE notifications_test'
+TEST_DATABASE_URL='postgres://postgres:postgres@localhost:15435/notifications_test?sslmode=disable' \
+  go test -race ./tests/integration -v
 ```
 
 Run the Docker-backed lifecycle test:

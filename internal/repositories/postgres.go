@@ -197,23 +197,55 @@ func (r *Repository) CreateEvent(ctx context.Context, event models.Event) (model
 	return event, ids, tx.Commit(ctx)
 }
 
-func (r *Repository) CreateScheduled(ctx context.Context, now time.Time) ([]string, error) {
-	minute := now.UTC().Format("15:04")
-	date := now.UTC().Format("2006-01-02")
+// scheduledDueQuery finds scheduled rules whose local firing time falls in the half-open
+// window (since, now], evaluated in each user's own timezone rather than in UTC. The
+// LATERAL block builds the rule's firing instant on the local date at each end of the
+// window -- the two differ only when the window crosses local midnight -- and keeps the
+// one that lands inside it.
+//
+// Both DST transitions fall out of evaluating the window in local wall clock:
+//
+//   - Fall back (01:00-02:00 happens twice): local time moves backwards, so the window at
+//     the transition tick is empty and the rule fires once, on the first pass through the
+//     repeated hour. The unique index on (user_id, rule_id, occurrence_date) -- where
+//     occurrence_date is now the user's local date -- suppresses the second pass. Chosen
+//     because a duplicate notification is worse for a user than a slightly early one.
+//   - Spring forward (02:00-03:00 does not exist): a rule at 02:30 would otherwise be
+//     skipped for the day. The local window at the transition tick runs from 01:59:5x
+//     straight to 03:00:0x, so 02:30 falls inside it and the rule fires at the jump.
+const scheduledDueQuery = `
+SELECT r.id, r.user_id, r.channel, r.subject_template, r.body_template, f.fire_ts::date::text
+FROM notification_rules r
+JOIN users u ON u.id = r.user_id AND u.active = true
+JOIN notification_preferences p ON p.user_id = r.user_id AND p.channel = r.channel AND p.enabled = true
+CROSS JOIN LATERAL (
+    SELECT ts FROM (VALUES
+        ((($1::timestamptz AT TIME ZONE u.timezone)::date + r.scheduled_time)),
+        ((($2::timestamptz AT TIME ZONE u.timezone)::date + r.scheduled_time))
+    ) AS candidate(ts)
+    WHERE ts >  ($1::timestamptz AT TIME ZONE u.timezone)
+      AND ts <= ($2::timestamptz AT TIME ZONE u.timezone)
+    ORDER BY ts LIMIT 1
+) AS f(fire_ts)
+WHERE r.enabled = true
+  AND r.trigger_type = 'scheduled'
+  AND (r.frequency = 'daily' OR (r.frequency = 'weekly' AND EXTRACT(ISODOW FROM f.fire_ts::date) = 1))`
+
+func (r *Repository) CreateScheduled(ctx context.Context, since, now time.Time) ([]string, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT r.id,r.user_id,r.channel,r.subject_template,r.body_template FROM notification_rules r JOIN users u ON u.id=r.user_id AND u.active=true JOIN notification_preferences p ON p.user_id=r.user_id AND p.channel=r.channel AND p.enabled=true WHERE r.enabled=true AND r.trigger_type='scheduled' AND r.scheduled_time=$1::time AND (r.frequency='daily' OR (r.frequency='weekly' AND EXTRACT(ISODOW FROM $2::date)=1))`, minute, date)
+	rows, err := tx.Query(ctx, scheduledDueQuery, since.UTC(), now.UTC())
 	if err != nil {
 		return nil, err
 	}
-	type ruleRow struct{ id, userID, channel, subject, body string }
+	type ruleRow struct{ id, userID, channel, subject, body, localDate string }
 	matched := []ruleRow{}
 	for rows.Next() {
 		var item ruleRow
-		if err = rows.Scan(&item.id, &item.userID, &item.channel, &item.subject, &item.body); err != nil {
+		if err = rows.Scan(&item.id, &item.userID, &item.channel, &item.subject, &item.body, &item.localDate); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -227,7 +259,7 @@ func (r *Repository) CreateScheduled(ctx context.Context, now time.Time) ([]stri
 	ids := []string{}
 	for _, item := range matched {
 		var id string
-		err = tx.QueryRow(ctx, `INSERT INTO notifications(user_id,rule_id,channel,subject,body,status,scheduled_at,occurrence_date) VALUES($1,$2,$3,$4,$5,'pending',$6,$7) ON CONFLICT DO NOTHING RETURNING id`, item.userID, item.id, item.channel, item.subject, item.body, now, date).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO notifications(user_id,rule_id,channel,subject,body,status,scheduled_at,occurrence_date) VALUES($1,$2,$3,$4,$5,'pending',$6,$7::date) ON CONFLICT DO NOTHING RETURNING id`, item.userID, item.id, item.channel, item.subject, item.body, now.UTC(), item.localDate).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
