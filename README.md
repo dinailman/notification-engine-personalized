@@ -1,5 +1,7 @@
 # Personalized Notification Engine
 
+[![CI](https://github.com/dinailman/notification-engine-personalized/actions/workflows/ci.yml/badge.svg)](https://github.com/dinailman/notification-engine-personalized/actions/workflows/ci.yml)
+
 Production-style Go notification service that personalizes user engagement messages for SaaS and marketplace products.
 
 ## Problem
@@ -219,7 +221,6 @@ Workers lease notifications for sixty seconds before delivery. A recovery loop p
 - Use an outbox table to make database writes and queue publication atomic.
 - Replace the mock sender with provider adapters for email, push, and in-app delivery.
 - Use Kafka or a durable managed queue for higher throughput.
-- Schedule in each user timezone and add quiet hours.
-- Add authentication, tenant isolation, provider webhooks, OpenTelemetry, and a dead-letter workflow.
+- Add tenant isolation, provider webhooks, OpenTelemetry, and a dead-letter workflow.
 - Replace the single development API key with tenant-scoped credentials and role-based authorization.
 - Move secrets and local database credentials to a secret manager.
