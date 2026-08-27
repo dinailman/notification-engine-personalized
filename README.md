@@ -207,6 +207,13 @@ The mock sender logs successful delivery. Put `fail_delivery` in a notification 
 
 Workers lease notifications for sixty seconds before delivery. A recovery loop periodically requeues pending notifications whose lease expired, allowing work to resume after a worker crash without treating Redis as the source of truth.
 
+## Design Notes
+
+- Workers lease a notification for sixty seconds and a recovery loop requeues expired leases, which recovers a crashed delivery without the second write path an outbox needs.
+- Redis carries notification IDs rather than payloads, so losing the queue costs delivery latency and never message content.
+- PostgreSQL is the sole source of truth for notification state; Redis holds work to do, not a second ledger to reconcile.
+- A scheduled rule fires once on the repeated hour at fall back, because a duplicate notification costs a user more than a slightly early one.
+
 ## Production Considerations
 
 - Use an outbox table to make database writes and queue publication atomic.
