@@ -116,6 +116,8 @@ curl -X POST http://localhost:8083/events \
 
 The API stores the event, matches enabled rules and preferences, creates pending notifications, and pushes their IDs to Redis. The worker consumes the IDs and logs mock delivery.
 
+Ingesting one `external_id` from 50 concurrent callers leaves one event row and one notification: `TestConcurrentIngestCreatesOneNotification` in `tests/integration`.
+
 A notification raised inside the user's quiet window is held until the window closes and returned under `deferred_notification_ids`.
 
 Create a daily digest reminder:
