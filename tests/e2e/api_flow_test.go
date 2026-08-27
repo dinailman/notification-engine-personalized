@@ -49,6 +49,49 @@ func TestEventNotificationLifecycle(t *testing.T) {
 	t.Fatal("notification was not sent before timeout")
 }
 
+// TestQuietHoursHoldDelivery checks the quiet-hours path end to end: a user whose window
+// is open right now still gets the notification created, but the API reports it as
+// deferred and leaves it pending rather than handing it to the worker.
+func TestQuietHoursHoldDelivery(t *testing.T) {
+	base := strings.TrimRight(os.Getenv("E2E_BASE_URL"), "/")
+	if base == "" {
+		t.Skip("set E2E_BASE_URL to run against Docker Compose")
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	email := fmt.Sprintf("e2e-quiet-%d@example.com", time.Now().UnixNano())
+	// The user runs on UTC, so a window from an hour ago to two hours ahead is open now.
+	now := time.Now().UTC()
+	user := post(t, client, base+"/users", map[string]any{
+		"email": email, "name": "E2E Quiet User", "timezone": "UTC",
+		"quiet_hours_start": now.Add(-time.Hour).Format("15:04"),
+		"quiet_hours_end":   now.Add(2 * time.Hour).Format("15:04"),
+		"preferences":       []any{map[string]any{"channel": "in_app", "frequency": "daily", "enabled": true}},
+	}, http.StatusCreated, "")
+	uid := user["id"].(string)
+	post(t, client, base+"/users/"+uid+"/rules", map[string]any{"name": "Task summary", "trigger_type": "event", "event_type": "task_completed", "channel": "in_app", "subject_template": "Summary", "body_template": "Your {{event_type}} summary is ready", "enabled": true}, http.StatusCreated, "")
+
+	event := post(t, client, base+"/events", map[string]any{"user_id": uid, "event_type": "task_completed", "external_id": email, "payload": map[string]any{"items_completed": 3}}, http.StatusAccepted, "")
+	if ids := event["notification_ids"].([]any); len(ids) != 1 {
+		t.Fatalf("notification ids = %v, want one created notification", ids)
+	}
+	deferred := event["deferred_notification_ids"].([]any)
+	if len(deferred) != 1 {
+		t.Fatalf("deferred notification ids = %v, want the notification to be held", deferred)
+	}
+
+	n := get(t, client, base+"/notifications/"+deferred[0].(string), http.StatusOK).(map[string]any)
+	if n["status"] != "pending" {
+		t.Fatalf("held notification status = %v, want pending", n["status"])
+	}
+	scheduled, err := time.Parse(time.RFC3339, n["scheduled_at"].(string))
+	if err != nil {
+		t.Fatalf("parse scheduled_at: %v", err)
+	}
+	if !scheduled.After(now) {
+		t.Fatalf("scheduled_at = %s, want an instant after the quiet window opened", scheduled)
+	}
+}
+
 func post(t *testing.T, c *http.Client, url string, payload map[string]any, status int, token string) map[string]any {
 	t.Helper()
 	b, _ := json.Marshal(payload)

@@ -34,7 +34,7 @@ func main() {
 		logger.Error("redis connection failed", "error", err)
 		os.Exit(1)
 	}
-	s := &handlers.Server{Repo: &repositories.Repository{DB: db}, Queue: q, RateLimit: cfg.RateLimit, APIKey: cfg.APIKey}
+	s := &handlers.Server{Repo: &repositories.Repository{DB: db}, Queue: q, Logger: logger, RateLimit: cfg.RateLimit, APIKey: cfg.APIKey}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /users", s.CreateUser)
 	mux.HandleFunc("GET /users/{id}", s.GetUser)

@@ -16,13 +16,19 @@ const (
 )
 
 type User struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Timezone  string    `json:"timezone"`
-	Active    bool      `json:"active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+	// Timezone names the IANA zone every local time for this user is read in.
+	Timezone string `json:"timezone"`
+	Active   bool   `json:"active"`
+	// QuietHoursStart and QuietHoursEnd bound a "15:04" window, in Timezone, during
+	// which the user is not disturbed. Both empty means the user has no quiet window;
+	// an end at or before the start wraps past local midnight.
+	QuietHoursStart string    `json:"quiet_hours_start,omitempty"`
+	QuietHoursEnd   string    `json:"quiet_hours_end,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Preference struct {

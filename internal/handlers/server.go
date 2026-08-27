@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -15,22 +16,38 @@ import (
 	"github.com/dinailman/personalized-notification-engine/internal/models"
 	"github.com/dinailman/personalized-notification-engine/internal/queue"
 	"github.com/dinailman/personalized-notification-engine/internal/repositories"
+	"github.com/dinailman/personalized-notification-engine/internal/rules"
 )
 
 type Server struct {
 	Repo                 *repositories.Repository
 	Queue                *queue.Queue
+	Logger               *slog.Logger
 	RateLimit            int
 	APIKey               string
 	Requests             atomic.Uint64
 	NotificationsCreated atomic.Uint64
 }
+
+// log returns the server's logger, falling back to the default one so a Server built
+// without a logger -- as the handler tests do -- still works.
+func (s *Server) log() *slog.Logger {
+	if s.Logger == nil {
+		return slog.Default()
+	}
+	return s.Logger
+}
+
 type userRequest struct {
-	Email       string              `json:"email"`
-	Name        string              `json:"name"`
-	Timezone    string              `json:"timezone"`
-	Active      *bool               `json:"active"`
-	Preferences []models.Preference `json:"preferences"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Timezone string `json:"timezone"`
+	Active   *bool  `json:"active"`
+	// QuietHoursStart and QuietHoursEnd are "15:04" wall clock in the user's timezone.
+	// Both must be given together; both empty means the user has no quiet window.
+	QuietHoursStart string              `json:"quiet_hours_start"`
+	QuietHoursEnd   string              `json:"quiet_hours_end"`
+	Preferences     []models.Preference `json:"preferences"`
 }
 type ruleRequest struct {
 	Name            string `json:"name"`
@@ -68,7 +85,11 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "timezone is invalid")
 		return
 	}
-	u, err := s.Repo.CreateUser(r.Context(), models.User{Email: strings.ToLower(strings.TrimSpace(req.Email)), Name: strings.TrimSpace(req.Name), Timezone: tz, Active: true}, req.Preferences)
+	if !validQuietHours(req) {
+		errorJSON(w, 400, quietHoursMessage)
+		return
+	}
+	u, err := s.Repo.CreateUser(r.Context(), models.User{Email: strings.ToLower(strings.TrimSpace(req.Email)), Name: strings.TrimSpace(req.Name), Timezone: tz, Active: true, QuietHoursStart: req.QuietHoursStart, QuietHoursEnd: req.QuietHoursEnd}, req.Preferences)
 	if err != nil {
 		errorJSON(w, 409, "user or preference already exists")
 		return
@@ -100,7 +121,12 @@ func (s *Server) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "timezone is invalid")
 		return
 	}
-	u, err := s.Repo.UpdateUser(r.Context(), r.PathValue("id"), req.Name, req.Timezone, active)
+	if !validQuietHours(req) {
+		errorJSON(w, 400, quietHoursMessage)
+		return
+	}
+	// An update carrying no quiet hours clears the window the user had before.
+	u, err := s.Repo.UpdateUser(r.Context(), r.PathValue("id"), models.User{Name: req.Name, Timezone: req.Timezone, Active: active, QuietHoursStart: req.QuietHoursStart, QuietHoursEnd: req.QuietHoursEnd})
 	if err != nil {
 		notFound(w, err)
 		return
@@ -189,19 +215,29 @@ func (s *Server) CreateEvent(w http.ResponseWriter, r *http.Request) {
 	if req.OccurredAt != nil {
 		occurred = req.OccurredAt.UTC()
 	}
-	event, ids, err := s.Repo.CreateEvent(r.Context(), models.Event{UserID: req.UserID, EventType: req.EventType, ExternalID: req.ExternalID, Payload: req.Payload, OccurredAt: occurred})
+	event, created, err := s.Repo.CreateEvent(r.Context(), models.Event{UserID: req.UserID, EventType: req.EventType, ExternalID: req.ExternalID, Payload: req.Payload, OccurredAt: occurred})
 	if err != nil {
 		errorJSON(w, 409, "event could not be recorded")
 		return
 	}
-	for _, id := range ids {
-		if err := s.Queue.Enqueue(r.Context(), id); err != nil {
+	ids := make([]string, 0, len(created))
+	deferred := make([]string, 0, len(created))
+	for _, c := range created {
+		ids = append(ids, c.ID)
+		s.NotificationsCreated.Add(1)
+		// A notification held for the user's quiet window is not queued now; the
+		// worker's recovery loop picks it up once the window closes.
+		if c.Deferred {
+			deferred = append(deferred, c.ID)
+			s.log().Info("notification deferred for quiet hours", "notification_id", c.ID, "user_id", req.UserID, "deliver_at", c.DeliverAt)
+			continue
+		}
+		if err := s.Queue.Enqueue(r.Context(), c.ID); err != nil {
 			errorJSON(w, 503, "event recorded but notification queue is unavailable")
 			return
 		}
-		s.NotificationsCreated.Add(1)
 	}
-	jsonResponse(w, 202, map[string]any{"event": event, "notification_ids": ids})
+	jsonResponse(w, 202, map[string]any{"event": event, "notification_ids": ids, "deferred_notification_ids": deferred})
 }
 func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.Repo.DB.Query(r.Context(), `SELECT id,user_id,event_type,COALESCE(external_id,''),payload,occurred_at,created_at FROM events WHERE user_id=$1 ORDER BY occurred_at DESC LIMIT 100`, r.PathValue("id"))
@@ -312,6 +348,17 @@ func (s *Server) RequireAPIKey(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+const quietHoursMessage = "quiet_hours_start and quiet_hours_end must both be HH:MM and must differ, or both be omitted"
+
+// validQuietHours reports whether the optional quiet window on a user request is usable.
+// Omitting both halves is valid and means the user has no quiet window.
+func validQuietHours(req userRequest) bool {
+	if req.QuietHoursStart == "" && req.QuietHoursEnd == "" {
+		return true
+	}
+	return rules.ValidQuietHours(req.QuietHoursStart, req.QuietHoursEnd)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

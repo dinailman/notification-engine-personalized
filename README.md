@@ -24,6 +24,7 @@ Redis carries notification IDs rather than full payloads. PostgreSQL owns users,
 - Email, push, and in-app preferences
 - Daily and weekly frequencies
 - Scheduled reminder rules evaluated in each user's timezone, including DST transitions
+- Per-user quiet hours that hold delivery until the window closes
 - Event-driven rules such as `task_completed` or `document_uploaded`
 - Idempotent event ingestion using `external_id`
 - Redis-backed notification queue
@@ -70,13 +71,17 @@ curl -X POST http://localhost:8083/users \
   -d '{
     "email":"sam@example.com",
     "name":"Sam Lee",
-    "timezone":"UTC",
+    "timezone":"Asia/Jakarta",
+    "quiet_hours_start":"22:00",
+    "quiet_hours_end":"07:00",
     "preferences":[
       {"channel":"email","frequency":"daily","enabled":true},
       {"channel":"in_app","frequency":"weekly","enabled":true}
     ]
   }'
 ```
+
+Quiet hours are optional `HH:MM` local times, sent as both halves or neither, and wrap past midnight.
 
 Create an event rule:
 
@@ -110,6 +115,8 @@ curl -X POST http://localhost:8083/events \
 ```
 
 The API stores the event, matches enabled rules and preferences, creates pending notifications, and pushes their IDs to Redis. The worker consumes the IDs and logs mock delivery.
+
+A notification raised inside the user's quiet window is held until the window closes and returned under `deferred_notification_ids`.
 
 Create a daily digest reminder:
 

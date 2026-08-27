@@ -41,18 +41,25 @@ func (s *Scheduler) Run(ctx context.Context) {
 // from. A failed tick returns since unchanged so the window is retried rather than lost.
 func (s *Scheduler) tick(ctx context.Context, since time.Time) time.Time {
 	now := time.Now().UTC()
-	ids, err := s.Repo.CreateScheduled(ctx, since, now)
+	created, err := s.Repo.CreateScheduled(ctx, since, now)
 	if err != nil {
 		s.Logger.Error("schedule notifications failed", "error", err)
 		return since
 	}
-	for _, id := range ids {
-		if err := s.Queue.Enqueue(ctx, id); err != nil {
-			s.Logger.Error("enqueue scheduled notification failed", "error", err, "notification_id", id)
+	deferred := 0
+	for _, c := range created {
+		// A notification held for the user's quiet window is not queued now; the
+		// worker's recovery loop picks it up once the window closes.
+		if c.Deferred {
+			deferred++
+			continue
+		}
+		if err := s.Queue.Enqueue(ctx, c.ID); err != nil {
+			s.Logger.Error("enqueue scheduled notification failed", "error", err, "notification_id", c.ID)
 		}
 	}
-	if len(ids) > 0 {
-		s.Logger.Info("scheduled notifications", "count", len(ids))
+	if len(created) > 0 {
+		s.Logger.Info("scheduled notifications", "count", len(created), "deferred_for_quiet_hours", deferred)
 	}
 	return now
 }

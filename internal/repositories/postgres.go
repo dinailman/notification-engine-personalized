@@ -16,17 +16,74 @@ import (
 
 var ErrNotFound = errors.New("resource not found")
 
+// ErrInvalidQuietHours reports a quiet window the engine cannot act on: one half given
+// without the other, a time that is not "15:04", or a start equal to its end.
+var ErrInvalidQuietHours = errors.New("quiet hours must be HH:MM values that differ, or both empty")
+
 type Repository struct{ DB *pgxpool.Pool }
+
+// Created is a notification this engine has just written. Deferred marks one that landed
+// inside the recipient's quiet window: its scheduled_at is the instant that window
+// closes, so the caller must not enqueue it now. The worker's recovery loop picks it up
+// once scheduled_at passes, which also survives an API or worker restart in between.
+type Created struct {
+	ID string
+	// DeliverAt is when delivery is allowed: now, or the end of the quiet window.
+	DeliverAt time.Time
+	Deferred  bool
+}
+
+// userColumns reads the quiet window back as "15:04" text, or "" for a user who has none,
+// matching how models.User carries it.
+const userColumns = `id,email,name,timezone,active,COALESCE(to_char(quiet_hours_start,'HH24:MI'),''),COALESCE(to_char(quiet_hours_end,'HH24:MI'),''),created_at,updated_at`
+
+func scanUser(row pgx.Row) (models.User, error) {
+	var u models.User
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.Timezone, &u.Active, &u.QuietHoursStart, &u.QuietHoursEnd, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, ErrNotFound
+	}
+	return u, err
+}
+
+// quietHours normalises a user's window for the database: empty strings become NULL, and
+// anything else must be a usable window.
+func quietHours(u models.User) (start, end string, err error) {
+	if u.QuietHoursStart == "" && u.QuietHoursEnd == "" {
+		return "", "", nil
+	}
+	if !rules.ValidQuietHours(u.QuietHoursStart, u.QuietHoursEnd) {
+		return "", "", ErrInvalidQuietHours
+	}
+	return u.QuietHoursStart, u.QuietHoursEnd, nil
+}
+
+// deliverAt returns when a notification for this user may be delivered: now, unless now
+// falls inside the user's quiet window, in which case it is the instant the window
+// closes. An unloadable timezone leaves delivery immediate rather than dropping the
+// notification into a window that cannot be evaluated.
+func deliverAt(now time.Time, timezone, quietStart, quietEnd string) time.Time {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return now
+	}
+	at, _ := rules.NextAllowed(now, loc, quietStart, quietEnd)
+	return at
+}
 
 func (r *Repository) Health(ctx context.Context) error { return r.DB.Ping(ctx) }
 
 func (r *Repository) CreateUser(ctx context.Context, user models.User, preferences []models.Preference) (models.User, error) {
+	quietStart, quietEnd, err := quietHours(user)
+	if err != nil {
+		return user, err
+	}
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return user, err
 	}
 	defer tx.Rollback(ctx)
-	err = tx.QueryRow(ctx, `INSERT INTO users(email,name,timezone,active) VALUES($1,$2,$3,$4) RETURNING id,created_at,updated_at`, user.Email, user.Name, user.Timezone, true).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO users(email,name,timezone,active,quiet_hours_start,quiet_hours_end) VALUES($1,$2,$3,$4,NULLIF($5,'')::time,NULLIF($6,'')::time) RETURNING id,created_at,updated_at`, user.Email, user.Name, user.Timezone, true, quietStart, quietEnd).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return user, err
 	}
@@ -42,21 +99,17 @@ func (r *Repository) CreateUser(ctx context.Context, user models.User, preferenc
 }
 
 func (r *Repository) GetUser(ctx context.Context, id string) (models.User, error) {
-	var u models.User
-	err := r.DB.QueryRow(ctx, `SELECT id,email,name,timezone,active,created_at,updated_at FROM users WHERE id=$1`, id).Scan(&u.ID, &u.Email, &u.Name, &u.Timezone, &u.Active, &u.CreatedAt, &u.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, ErrNotFound
-	}
-	return u, err
+	return scanUser(r.DB.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id=$1`, id))
 }
 
-func (r *Repository) UpdateUser(ctx context.Context, id string, name, timezone string, active bool) (models.User, error) {
-	var u models.User
-	err := r.DB.QueryRow(ctx, `UPDATE users SET name=$2,timezone=$3,active=$4,updated_at=now() WHERE id=$1 RETURNING id,email,name,timezone,active,created_at,updated_at`, id, name, timezone, active).Scan(&u.ID, &u.Email, &u.Name, &u.Timezone, &u.Active, &u.CreatedAt, &u.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, ErrNotFound
+// UpdateUser replaces the mutable fields of a user: name, timezone, active state, and the
+// quiet window. An update carrying no quiet hours clears any window already stored.
+func (r *Repository) UpdateUser(ctx context.Context, id string, update models.User) (models.User, error) {
+	quietStart, quietEnd, err := quietHours(update)
+	if err != nil {
+		return update, err
 	}
-	return u, err
+	return scanUser(r.DB.QueryRow(ctx, `UPDATE users SET name=$2,timezone=$3,active=$4,quiet_hours_start=NULLIF($5,'')::time,quiet_hours_end=NULLIF($6,'')::time,updated_at=now() WHERE id=$1 RETURNING `+userColumns, id, update.Name, update.Timezone, update.Active, quietStart, quietEnd))
 }
 
 func (r *Repository) Preferences(ctx context.Context, userID string) ([]models.Preference, error) {
@@ -144,7 +197,10 @@ func (r *Repository) DeleteRule(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) CreateEvent(ctx context.Context, event models.Event) (models.Event, []string, error) {
+// CreateEvent records an event and creates a notification for every enabled rule and
+// preference it matches. Notifications for a user whose quiet window is open are written
+// with a scheduled_at at the end of that window and reported as deferred.
+func (r *Repository) CreateEvent(ctx context.Context, event models.Event) (models.Event, []Created, error) {
 	payload, err := json.Marshal(event.Payload)
 	if err != nil {
 		return event, nil, err
@@ -166,15 +222,15 @@ func (r *Repository) CreateEvent(ctx context.Context, event models.Event) (model
 	if err != nil {
 		return event, nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT r.id,r.channel,r.subject_template,r.body_template FROM notification_rules r JOIN notification_preferences p ON p.user_id=r.user_id AND p.channel=r.channel AND p.enabled=true WHERE r.user_id=$1 AND r.enabled=true AND r.trigger_type='event' AND r.event_type=$2`, event.UserID, event.EventType)
+	rows, err := tx.Query(ctx, `SELECT r.id,r.channel,r.subject_template,r.body_template,u.timezone,COALESCE(to_char(u.quiet_hours_start,'HH24:MI'),''),COALESCE(to_char(u.quiet_hours_end,'HH24:MI'),'') FROM notification_rules r JOIN users u ON u.id=r.user_id JOIN notification_preferences p ON p.user_id=r.user_id AND p.channel=r.channel AND p.enabled=true WHERE r.user_id=$1 AND r.enabled=true AND r.trigger_type='event' AND r.event_type=$2`, event.UserID, event.EventType)
 	if err != nil {
 		return event, nil, err
 	}
-	type ruleRow struct{ id, channel, subject, body string }
+	type ruleRow struct{ id, channel, subject, body, timezone, quietStart, quietEnd string }
 	matched := []ruleRow{}
 	for rows.Next() {
 		var item ruleRow
-		if err = rows.Scan(&item.id, &item.channel, &item.subject, &item.body); err != nil {
+		if err = rows.Scan(&item.id, &item.channel, &item.subject, &item.body, &item.timezone, &item.quietStart, &item.quietEnd); err != nil {
 			rows.Close()
 			return event, nil, err
 		}
@@ -185,16 +241,18 @@ func (r *Repository) CreateEvent(ctx context.Context, event models.Event) (model
 		return event, nil, err
 	}
 	rows.Close()
-	ids := []string{}
+	now := time.Now().UTC()
+	created := []Created{}
 	for _, item := range matched {
+		at := deliverAt(now, item.timezone, item.quietStart, item.quietEnd)
 		var id string
-		err = tx.QueryRow(ctx, `INSERT INTO notifications(user_id,rule_id,event_id,channel,subject,body,status,scheduled_at) VALUES($1,$2,$3,$4,$5,$6,'pending',now()) RETURNING id`, event.UserID, item.id, event.ID, item.channel, rules.Render(item.subject, map[string]string{"event_type": event.EventType}), rules.Render(item.body, map[string]string{"event_type": event.EventType})).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO notifications(user_id,rule_id,event_id,channel,subject,body,status,scheduled_at) VALUES($1,$2,$3,$4,$5,$6,'pending',$7) RETURNING id`, event.UserID, item.id, event.ID, item.channel, rules.Render(item.subject, map[string]string{"event_type": event.EventType}), rules.Render(item.body, map[string]string{"event_type": event.EventType}), at).Scan(&id)
 		if err != nil {
 			return event, nil, err
 		}
-		ids = append(ids, id)
+		created = append(created, Created{ID: id, DeliverAt: at, Deferred: at.After(now)})
 	}
-	return event, ids, tx.Commit(ctx)
+	return event, created, tx.Commit(ctx)
 }
 
 // scheduledDueQuery finds scheduled rules whose local firing time falls in the half-open
@@ -214,7 +272,10 @@ func (r *Repository) CreateEvent(ctx context.Context, event models.Event) (model
 //     skipped for the day. The local window at the transition tick runs from 01:59:5x
 //     straight to 03:00:0x, so 02:30 falls inside it and the rule fires at the jump.
 const scheduledDueQuery = `
-SELECT r.id, r.user_id, r.channel, r.subject_template, r.body_template, f.fire_ts::date::text
+SELECT r.id, r.user_id, r.channel, r.subject_template, r.body_template, f.fire_ts::date::text,
+       u.timezone,
+       COALESCE(to_char(u.quiet_hours_start, 'HH24:MI'), ''),
+       COALESCE(to_char(u.quiet_hours_end, 'HH24:MI'), '')
 FROM notification_rules r
 JOIN users u ON u.id = r.user_id AND u.active = true
 JOIN notification_preferences p ON p.user_id = r.user_id AND p.channel = r.channel AND p.enabled = true
@@ -231,7 +292,11 @@ WHERE r.enabled = true
   AND r.trigger_type = 'scheduled'
   AND (r.frequency = 'daily' OR (r.frequency = 'weekly' AND EXTRACT(ISODOW FROM f.fire_ts::date) = 1))`
 
-func (r *Repository) CreateScheduled(ctx context.Context, since, now time.Time) ([]string, error) {
+// CreateScheduled writes a notification for every scheduled rule due in (since, now].
+// A rule that fires inside its user's quiet window is still created on its own local day
+// -- so the once-per-day guard holds -- but its scheduled_at is moved to the end of the
+// window and it is reported as deferred.
+func (r *Repository) CreateScheduled(ctx context.Context, since, now time.Time) ([]Created, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -241,11 +306,11 @@ func (r *Repository) CreateScheduled(ctx context.Context, since, now time.Time) 
 	if err != nil {
 		return nil, err
 	}
-	type ruleRow struct{ id, userID, channel, subject, body, localDate string }
+	type ruleRow struct{ id, userID, channel, subject, body, localDate, timezone, quietStart, quietEnd string }
 	matched := []ruleRow{}
 	for rows.Next() {
 		var item ruleRow
-		if err = rows.Scan(&item.id, &item.userID, &item.channel, &item.subject, &item.body, &item.localDate); err != nil {
+		if err = rows.Scan(&item.id, &item.userID, &item.channel, &item.subject, &item.body, &item.localDate, &item.timezone, &item.quietStart, &item.quietEnd); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -256,22 +321,23 @@ func (r *Repository) CreateScheduled(ctx context.Context, since, now time.Time) 
 		return nil, err
 	}
 	rows.Close()
-	ids := []string{}
+	created := []Created{}
 	for _, item := range matched {
+		at := deliverAt(now.UTC(), item.timezone, item.quietStart, item.quietEnd)
 		var id string
-		err = tx.QueryRow(ctx, `INSERT INTO notifications(user_id,rule_id,channel,subject,body,status,scheduled_at,occurrence_date) VALUES($1,$2,$3,$4,$5,'pending',$6,$7::date) ON CONFLICT DO NOTHING RETURNING id`, item.userID, item.id, item.channel, item.subject, item.body, now.UTC(), item.localDate).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO notifications(user_id,rule_id,channel,subject,body,status,scheduled_at,occurrence_date) VALUES($1,$2,$3,$4,$5,'pending',$6,$7::date) ON CONFLICT DO NOTHING RETURNING id`, item.userID, item.id, item.channel, item.subject, item.body, at, item.localDate).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		created = append(created, Created{ID: id, DeliverAt: at, Deferred: at.After(now.UTC())})
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return ids, nil
+	return created, nil
 }
 
 func (r *Repository) GetNotification(ctx context.Context, id string) (models.Notification, error) {

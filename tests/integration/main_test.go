@@ -76,15 +76,24 @@ func repo(t *testing.T) *repositories.Repository {
 	return &repositories.Repository{DB: pool}
 }
 
-// newUser creates an active user in the given timezone with every channel enabled.
+// newUser creates an active user in the given timezone with every channel enabled and no
+// quiet window.
 func newUser(t *testing.T, r *repositories.Repository, timezone string) models.User {
+	t.Helper()
+	return newQuietUser(t, r, timezone, "", "")
+}
+
+// newQuietUser is newUser with a quiet window, given as "15:04" local times.
+func newQuietUser(t *testing.T, r *repositories.Repository, timezone, quietStart, quietEnd string) models.User {
 	t.Helper()
 	email := t.Name() + "-" + timezone + "-" + time.Now().Format("150405.000000000") + "@example.com"
 	user, err := r.CreateUser(context.Background(), models.User{
-		Email:    email,
-		Name:     "Integration User",
-		Timezone: timezone,
-		Active:   true,
+		Email:           email,
+		Name:            "Integration User",
+		Timezone:        timezone,
+		Active:          true,
+		QuietHoursStart: quietStart,
+		QuietHoursEnd:   quietEnd,
 	}, []models.Preference{
 		{Channel: models.ChannelEmail, Frequency: models.FrequencyDaily, Enabled: true},
 		{Channel: models.ChannelInApp, Frequency: models.FrequencyDaily, Enabled: true},
@@ -115,16 +124,45 @@ func newScheduledRule(t *testing.T, r *repositories.Repository, userID, at strin
 	return rule
 }
 
-// notificationOwners maps the given notification IDs back to their user IDs.
-func notificationOwners(t *testing.T, r *repositories.Repository, ids []string) []string {
+// newEventRule creates an event-driven rule for the given event type.
+func newEventRule(t *testing.T, r *repositories.Repository, userID, eventType string) models.Rule {
+	t.Helper()
+	rule, err := r.CreateRule(context.Background(), models.Rule{
+		UserID:          userID,
+		Name:            "Task summary",
+		TriggerType:     models.TriggerEvent,
+		EventType:       eventType,
+		Channel:         models.ChannelEmail,
+		SubjectTemplate: "Your summary is ready",
+		BodyTemplate:    "Your {{event_type}} summary is ready.",
+		Enabled:         true,
+	})
+	if err != nil {
+		t.Fatalf("create event rule for %s: %v", eventType, err)
+	}
+	return rule
+}
+
+// notificationOwners maps the given notifications back to their user IDs.
+func notificationOwners(t *testing.T, r *repositories.Repository, created []repositories.Created) []string {
 	t.Helper()
 	owners := []string{}
-	for _, id := range ids {
-		n, err := r.GetNotification(context.Background(), id)
+	for _, c := range created {
+		n, err := r.GetNotification(context.Background(), c.ID)
 		if err != nil {
-			t.Fatalf("load notification %s: %v", id, err)
+			t.Fatalf("load notification %s: %v", c.ID, err)
 		}
 		owners = append(owners, n.UserID)
 	}
 	return owners
+}
+
+// scheduledAt reads back when a created notification is allowed to be delivered.
+func scheduledAt(t *testing.T, r *repositories.Repository, c repositories.Created) time.Time {
+	t.Helper()
+	n, err := r.GetNotification(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("load notification %s: %v", c.ID, err)
+	}
+	return n.ScheduledAt.UTC()
 }
