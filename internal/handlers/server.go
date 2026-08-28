@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -322,7 +323,7 @@ func (s *Server) RateLimited(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		allowed, err := s.Queue.Allow(r.Context(), r.RemoteAddr, s.RateLimit)
+		allowed, err := s.Queue.Allow(r.Context(), clientIP(r), s.RateLimit)
 		if err != nil {
 			errorJSON(w, 503, "rate limiter unavailable")
 			return
@@ -348,6 +349,21 @@ func (s *Server) RequireAPIKey(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// clientIP is the identity the rate limiter counts against: the host half of RemoteAddr.
+// RemoteAddr itself is "IP:port", and the port is a fresh ephemeral one per connection, so
+// keying on it hands every new connection its own budget and the limit never applies.
+//
+// The socket address is used rather than X-Forwarded-For because a client sets that header
+// freely and could buy itself unlimited budget. Running behind a proxy needs an explicit
+// trusted-proxy policy, which is a deployment decision rather than a silent default.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 const quietHoursMessage = "quiet_hours_start and quiet_hours_end must both be HH:MM and must differ, or both be omitted"

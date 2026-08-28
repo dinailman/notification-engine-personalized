@@ -40,6 +40,23 @@ func TestCreateUserRejectsUnusableQuietHours(t *testing.T) {
 	}
 }
 
+// The rate limiter counts against clientIP, so it must strip the ephemeral port. Keying on
+// the raw RemoteAddr gave every new connection its own budget and the limit never applied.
+func TestClientIPStripsThePort(t *testing.T) {
+	for _, testCase := range []struct{ remoteAddr, want string }{
+		{"192.0.2.1:54321", "192.0.2.1"},
+		{"192.0.2.1:54322", "192.0.2.1"},
+		{"[2001:db8::1]:443", "2001:db8::1"},
+		{"unix-socket-or-otherwise-unsplittable", "unix-socket-or-otherwise-unsplittable"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/users", nil)
+		r.RemoteAddr = testCase.remoteAddr
+		if got := clientIP(r); got != testCase.want {
+			t.Errorf("clientIP(%q) = %q, want %q", testCase.remoteAddr, got, testCase.want)
+		}
+	}
+}
+
 func TestDateRangeDefaultsAndValidation(t *testing.T) {
 	from, to, err := dateRange("", "")
 	if err != nil || !from.Before(to) {

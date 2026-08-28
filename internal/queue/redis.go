@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"github.com/redis/go-redis/v9"
 	"time"
 )
@@ -35,14 +36,23 @@ func (q *Queue) Dequeue(ctx context.Context) (string, error) {
 	return values[1], nil
 }
 
+// Allow reports whether key may make one more request in the current minute. key identifies
+// the client, so it must not carry anything that varies per connection -- see clientIP in the
+// handlers package.
+//
+// The minute is baked into the Redis key rather than tracked by a TTL on a fixed key. That
+// makes setting the expiry idempotent: the counter and its expiry are pipelined into one
+// MULTI/EXEC, so there is no window where an INCR has landed but its TTL has not and the key
+// outlives its window forever. Re-setting the expiry on every request is safe only because
+// the bucket rotates -- on a fixed key it would hold the window open for as long as a client
+// kept knocking.
 func (q *Queue) Allow(ctx context.Context, key string, limit int) (bool, error) {
-	key = "notification-engine:rate:" + key
-	count, err := q.client.Incr(ctx, key).Result()
-	if err != nil {
+	bucket := fmt.Sprintf("notification-engine:rate:%s:%d", key, time.Now().Unix()/60)
+	pipe := q.client.TxPipeline()
+	count := pipe.Incr(ctx, bucket)
+	pipe.Expire(ctx, bucket, 2*time.Minute)
+	if _, err := pipe.Exec(ctx); err != nil {
 		return false, err
 	}
-	if count == 1 {
-		_ = q.client.Expire(ctx, key, time.Minute).Err()
-	}
-	return count <= int64(limit), nil
+	return count.Val() <= int64(limit), nil
 }

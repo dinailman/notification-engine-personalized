@@ -191,9 +191,10 @@ docker compose config
 Run the PostgreSQL-backed repository tests. They are skipped unless `TEST_DATABASE_URL` is set, and they drop and re-apply the schema, so point them at a throwaway database:
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres redis
 docker compose exec -T postgres psql -U postgres -c 'CREATE DATABASE notifications_test'
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:15435/notifications_test?sslmode=disable' \
+TEST_REDIS_ADDR='localhost:16380' \
   go test -race ./tests/integration -v
 ```
 
