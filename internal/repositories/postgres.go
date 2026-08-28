@@ -9,7 +9,6 @@ import (
 
 	"github.com/dinailman/personalized-notification-engine/internal/models"
 	"github.com/dinailman/personalized-notification-engine/internal/rules"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -498,5 +497,3 @@ func (r *Repository) Analytics(ctx context.Context, from, to time.Time, userID, 
 	}
 	return out, rows.Err()
 }
-
-func NewID() string { return uuid.NewString() }

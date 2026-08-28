@@ -17,10 +17,6 @@ func ValidTrigger(trigger string) bool {
 	return trigger == models.TriggerScheduled || trigger == models.TriggerEvent
 }
 
-func EventMatches(rule models.Rule, event models.Event) bool {
-	return rule.Enabled && rule.TriggerType == models.TriggerEvent && rule.EventType == event.EventType
-}
-
 func Render(template string, values map[string]string) string {
 	for key, value := range values {
 		template = strings.ReplaceAll(template, "{{"+key+"}}", value)
