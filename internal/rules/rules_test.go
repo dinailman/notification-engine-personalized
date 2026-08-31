@@ -1,8 +1,9 @@
 package rules
 
 import (
-	"github.com/dinailman/personalized-notification-engine/internal/models"
 	"testing"
+
+	"github.com/dinailman/personalized-notification-engine/internal/models"
 )
 
 func TestRender(t *testing.T) {
