@@ -98,7 +98,11 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 201, u)
 }
 func (s *Server) GetUser(w http.ResponseWriter, r *http.Request) {
-	u, err := s.Repo.GetUser(r.Context(), r.PathValue("id"))
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	u, err := s.Repo.GetUser(r.Context(), id)
 	if err != nil {
 		notFound(w, err)
 		return
@@ -108,6 +112,10 @@ func (s *Server) GetUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	var req userRequest
 	if !decode(w, r, &req) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
 		return
 	}
 	if req.Name == "" || req.Timezone == "" {
@@ -127,7 +135,7 @@ func (s *Server) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// An update carrying no quiet hours clears the window the user had before.
-	u, err := s.Repo.UpdateUser(r.Context(), r.PathValue("id"), models.User{Name: req.Name, Timezone: req.Timezone, Active: active, QuietHoursStart: req.QuietHoursStart, QuietHoursEnd: req.QuietHoursEnd})
+	u, err := s.Repo.UpdateUser(r.Context(), id, models.User{Name: req.Name, Timezone: req.Timezone, Active: active, QuietHoursStart: req.QuietHoursStart, QuietHoursEnd: req.QuietHoursEnd})
 	if err != nil {
 		notFound(w, err)
 		return
@@ -135,7 +143,10 @@ func (s *Server) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, u)
 }
 func (s *Server) Preferences(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
 	if r.Method == http.MethodGet {
 		p, err := s.Repo.Preferences(r.Context(), id)
 		if err != nil {
@@ -161,11 +172,15 @@ func (s *Server) CreateRule(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	x, err := s.Repo.CreateRule(r.Context(), models.Rule{UserID: r.PathValue("id"), Name: req.Name, TriggerType: req.TriggerType, EventType: req.EventType, ScheduledTime: req.ScheduledTime, Frequency: req.Frequency, Channel: req.Channel, SubjectTemplate: req.SubjectTemplate, BodyTemplate: req.BodyTemplate, Enabled: enabled})
+	x, err := s.Repo.CreateRule(r.Context(), models.Rule{UserID: id, Name: req.Name, TriggerType: req.TriggerType, EventType: req.EventType, ScheduledTime: req.ScheduledTime, Frequency: req.Frequency, Channel: req.Channel, SubjectTemplate: req.SubjectTemplate, BodyTemplate: req.BodyTemplate, Enabled: enabled})
 	if err != nil {
 		errorJSON(w, 400, err.Error())
 		return
@@ -173,7 +188,11 @@ func (s *Server) CreateRule(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 201, x)
 }
 func (s *Server) ListRules(w http.ResponseWriter, r *http.Request) {
-	x, err := s.Repo.ListRules(r.Context(), r.PathValue("id"))
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	x, err := s.Repo.ListRules(r.Context(), id)
 	if err != nil {
 		errorJSON(w, 500, "could not list rules")
 		return
@@ -185,11 +204,15 @@ func (s *Server) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	x, err := s.Repo.UpdateRule(r.Context(), r.PathValue("id"), enabled, req.SubjectTemplate, req.BodyTemplate)
+	x, err := s.Repo.UpdateRule(r.Context(), id, enabled, req.SubjectTemplate, req.BodyTemplate)
 	if err != nil {
 		notFound(w, err)
 		return
@@ -197,7 +220,11 @@ func (s *Server) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, x)
 }
 func (s *Server) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if err := s.Repo.DeleteRule(r.Context(), r.PathValue("id")); err != nil {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.Repo.DeleteRule(r.Context(), id); err != nil {
 		notFound(w, err)
 		return
 	}
@@ -210,6 +237,10 @@ func (s *Server) CreateEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.UserID == "" || req.EventType == "" {
 		errorJSON(w, 400, "user_id and event_type are required")
+		return
+	}
+	if !validUUID(req.UserID) {
+		errorJSON(w, 400, "user_id must be a UUID")
 		return
 	}
 	occurred := time.Now().UTC()
@@ -241,7 +272,11 @@ func (s *Server) CreateEvent(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 202, map[string]any{"event": event, "notification_ids": ids, "deferred_notification_ids": deferred})
 }
 func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Repo.DB.Query(r.Context(), `SELECT id,user_id,event_type,COALESCE(external_id,''),payload,occurred_at,created_at FROM events WHERE user_id=$1 ORDER BY occurred_at DESC LIMIT 100`, r.PathValue("id"))
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.Repo.DB.Query(r.Context(), `SELECT id,user_id,event_type,COALESCE(external_id,''),payload,occurred_at,created_at FROM events WHERE user_id=$1 ORDER BY occurred_at DESC LIMIT 100`, id)
 	if err != nil {
 		errorJSON(w, 500, "could not list events")
 		return
@@ -261,7 +296,11 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, out)
 }
 func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request) {
-	x, err := s.Repo.ListNotifications(r.Context(), r.PathValue("id"))
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	x, err := s.Repo.ListNotifications(r.Context(), id)
 	if err != nil {
 		errorJSON(w, 500, "could not list notifications")
 		return
@@ -269,7 +308,11 @@ func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, x)
 }
 func (s *Server) GetNotification(w http.ResponseWriter, r *http.Request) {
-	x, err := s.Repo.GetNotification(r.Context(), r.PathValue("id"))
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	x, err := s.Repo.GetNotification(r.Context(), id)
 	if err != nil {
 		notFound(w, err)
 		return
@@ -277,7 +320,11 @@ func (s *Server) GetNotification(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, x)
 }
 func (s *Server) NotificationLogs(w http.ResponseWriter, r *http.Request) {
-	x, err := s.Repo.Logs(r.Context(), r.PathValue("id"))
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	x, err := s.Repo.Logs(r.Context(), id)
 	if err != nil {
 		errorJSON(w, 500, "could not list notification logs")
 		return
@@ -290,7 +337,12 @@ func (s *Server) Analytics(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, err.Error())
 		return
 	}
-	x, err := s.Repo.Analytics(r.Context(), from, to, r.URL.Query().Get("user_id"), r.URL.Query().Get("channel"))
+	userID := r.URL.Query().Get("user_id")
+	if userID != "" && !validUUID(userID) {
+		errorJSON(w, 400, invalidIDMessage)
+		return
+	}
+	x, err := s.Repo.Analytics(r.Context(), from, to, userID, r.URL.Query().Get("channel"))
 	if err != nil {
 		errorJSON(w, 500, "could not build analytics")
 		return
@@ -364,6 +416,46 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+const invalidIDMessage = "id must be a UUID"
+
+// validUUID reports whether s is a UUID in the canonical 8-4-4-4-12 form. Every id this API
+// hands out is written that way, and every id column is a Postgres uuid, so anything else is
+// a client mistake that must be rejected here -- reaching the driver with it produces a 500
+// for what is really a 400.
+//
+// This is stricter than Postgres, which also accepts the braced and undashed spellings, and
+// stricter than the driver's own parser, which strips positions 8, 13, 18 and 23 without
+// checking they hold a dash.
+func validUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// pathID returns the {id} path value, or writes a 400 and reports false so the handler
+// returns before the id reaches the database.
+func pathID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.PathValue("id")
+	if !validUUID(id) {
+		errorJSON(w, 400, invalidIDMessage)
+		return "", false
+	}
+	return id, true
 }
 
 const quietHoursMessage = "quiet_hours_start and quiet_hours_end must both be HH:MM and must differ, or both be omitted"

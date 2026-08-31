@@ -69,3 +69,79 @@ func TestDateRangeDefaultsAndValidation(t *testing.T) {
 		t.Fatal("reversed range accepted")
 	}
 }
+
+func TestValidUUID(t *testing.T) {
+	for _, id := range []string{
+		"0f8fad5b-d9cb-469f-a165-70867728950e",
+		"0F8FAD5B-D9CB-469F-A165-70867728950E",
+		"00000000-0000-0000-0000-000000000000",
+	} {
+		if !validUUID(id) {
+			t.Errorf("validUUID(%q) = false, want true", id)
+		}
+	}
+	for _, id := range []string{
+		"",
+		"not-a-uuid",
+		"0f8fad5b-d9cb-469f-a165-70867728950",    // one short
+		"0f8fad5b-d9cb-469f-a165-70867728950ef",  // one long
+		"0f8fad5bd9cb469fa16570867728950e",       // undashed, which Postgres takes and we do not
+		"{0f8fad5b-d9cb-469f-a165-70867728950e}", // braced, likewise
+		"0f8fad5b-d9cb-469f-a165-70867728950g",   // g is not hex
+		"0f8fad5bd-9cb-469f-a165-70867728950e",   // dashes misplaced
+		"0f8fad5bd9cb469fa16570867728950eabcd",   // 36 hex characters and no dashes at all
+	} {
+		if validUUID(id) {
+			t.Errorf("validUUID(%q) = true, want false", id)
+		}
+	}
+}
+
+// Every handler that takes an {id} must reject a malformed one itself. The Server here has a
+// nil Repo, so a handler that lets the id through panics instead of answering 400 -- which is
+// the point: reaching the driver is what turned a client mistake into a 500.
+func TestHandlersRejectMalformedIDs(t *testing.T) {
+	s := &Server{}
+	for _, testCase := range []struct {
+		name    string
+		handler http.HandlerFunc
+		body    string
+	}{
+		{"GetUser", s.GetUser, ""},
+		{"UpdateUser", s.UpdateUser, "{}"},
+		{"Preferences", s.Preferences, ""},
+		{"CreateRule", s.CreateRule, "{}"},
+		{"ListRules", s.ListRules, ""},
+		{"UpdateRule", s.UpdateRule, "{}"},
+		{"DeleteRule", s.DeleteRule, ""},
+		{"ListEvents", s.ListEvents, ""},
+		{"ListNotifications", s.ListNotifications, ""},
+		{"GetNotification", s.GetNotification, ""},
+		{"NotificationLogs", s.NotificationLogs, ""},
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(testCase.body))
+		r.SetPathValue("id", "not-a-uuid")
+		testCase.handler(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s status = %d, want 400", testCase.name, w.Code)
+		}
+	}
+}
+
+// The other two ways a user id arrives: the body of an ingest, where a malformed one used to
+// be answered 409 as though the event conflicted, and the optional analytics filter.
+func TestMalformedUserIDOutsideThePath(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(`{"user_id":"nope","event_type":"task_completed"}`))
+	(&Server{}).CreateEvent(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("POST /events status = %d, want 400", w.Code)
+	}
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/analytics/notifications?user_id=nope", nil)
+	(&Server{}).Analytics(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GET /analytics/notifications status = %d, want 400", w.Code)
+	}
+}

@@ -13,7 +13,7 @@
     },
     "/users/{id}": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "Get a user", "responses": {"200": {"description": "User"}, "404": {"description": "Not found"}}},
+      "get": {"summary": "Get a user", "responses": {"200": {"description": "User"}, "400": {"description": "Invalid UUID"}, "404": {"description": "Not found"}}},
       "patch": {
         "summary": "Update a user",
         "description": "Replaces name, timezone, active state and the quiet window. An update carrying no quiet hours clears the window the user had.",
@@ -23,7 +23,7 @@
     },
     "/users/{id}/preferences": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "List preferences", "responses": {"200": {"description": "Preferences"}}},
+      "get": {"summary": "List preferences", "responses": {"200": {"description": "Preferences"}, "400": {"description": "Invalid UUID"}}},
       "put": {
         "summary": "Replace preferences",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Preference"}}}}},
@@ -32,7 +32,7 @@
     },
     "/users/{id}/rules": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "List user rules", "responses": {"200": {"description": "Rules"}}},
+      "get": {"summary": "List user rules", "responses": {"200": {"description": "Rules"}, "400": {"description": "Invalid UUID"}}},
       "post": {
         "summary": "Create a notification rule",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleRequest"}}}},
@@ -44,9 +44,9 @@
       "patch": {
         "summary": "Update a rule",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RuleRequest"}}}},
-        "responses": {"200": {"description": "Updated"}, "404": {"description": "Not found"}}
+        "responses": {"200": {"description": "Updated"}, "400": {"description": "Invalid UUID"}, "404": {"description": "Not found"}}
       },
-      "delete": {"summary": "Delete a rule", "responses": {"204": {"description": "Deleted"}, "404": {"description": "Not found"}}}
+      "delete": {"summary": "Delete a rule", "responses": {"204": {"description": "Deleted"}, "400": {"description": "Invalid UUID"}, "404": {"description": "Not found"}}}
     },
     "/events": {
       "post": {
@@ -63,19 +63,19 @@
     },
     "/users/{id}/events": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "List user events", "responses": {"200": {"description": "Events"}}}
+      "get": {"summary": "List user events", "responses": {"200": {"description": "Events"}, "400": {"description": "Invalid UUID"}}}
     },
     "/users/{id}/notifications": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "List user notifications", "responses": {"200": {"description": "Notifications"}}}
+      "get": {"summary": "List user notifications", "responses": {"200": {"description": "Notifications"}, "400": {"description": "Invalid UUID"}}}
     },
     "/notifications/{id}": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "Get a notification", "responses": {"200": {"description": "Notification"}, "404": {"description": "Not found"}}}
+      "get": {"summary": "Get a notification", "responses": {"200": {"description": "Notification"}, "400": {"description": "Invalid UUID"}, "404": {"description": "Not found"}}}
     },
     "/notifications/{id}/logs": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "get": {"summary": "List delivery attempts", "responses": {"200": {"description": "Attempt logs"}}}
+      "get": {"summary": "List delivery attempts", "responses": {"200": {"description": "Attempt logs"}, "400": {"description": "Invalid UUID"}}}
     },
     "/analytics/notifications": {
       "get": {
