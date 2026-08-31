@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dinailman/personalized-notification-engine/internal/queue"
+	"github.com/dinailman/notification-engine-personalized/internal/queue"
 	"github.com/redis/go-redis/v9"
 )
 

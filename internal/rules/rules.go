@@ -1,8 +1,9 @@
 package rules
 
 import (
-	"github.com/dinailman/personalized-notification-engine/internal/models"
 	"strings"
+
+	"github.com/dinailman/notification-engine-personalized/internal/models"
 )
 
 func ValidChannel(channel string) bool {

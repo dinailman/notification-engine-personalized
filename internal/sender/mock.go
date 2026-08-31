@@ -3,9 +3,10 @@ package sender
 import (
 	"context"
 	"errors"
-	"github.com/dinailman/personalized-notification-engine/internal/models"
 	"log/slog"
 	"strings"
+
+	"github.com/dinailman/notification-engine-personalized/internal/models"
 )
 
 type Sender interface {

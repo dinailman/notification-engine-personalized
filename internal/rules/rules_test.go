@@ -3,7 +3,7 @@ package rules
 import (
 	"testing"
 
-	"github.com/dinailman/personalized-notification-engine/internal/models"
+	"github.com/dinailman/notification-engine-personalized/internal/models"
 )
 
 func TestRender(t *testing.T) {

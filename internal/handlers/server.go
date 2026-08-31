@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dinailman/personalized-notification-engine/internal/models"
-	"github.com/dinailman/personalized-notification-engine/internal/queue"
-	"github.com/dinailman/personalized-notification-engine/internal/repositories"
-	"github.com/dinailman/personalized-notification-engine/internal/rules"
+	"github.com/dinailman/notification-engine-personalized/internal/models"
+	"github.com/dinailman/notification-engine-personalized/internal/queue"
+	"github.com/dinailman/notification-engine-personalized/internal/repositories"
+	"github.com/dinailman/notification-engine-personalized/internal/rules"
 )
 
 type Server struct {

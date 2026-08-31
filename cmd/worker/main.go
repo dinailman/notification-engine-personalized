@@ -2,17 +2,18 @@ package main
 
 import (
 	"context"
-	"github.com/dinailman/personalized-notification-engine/internal/config"
-	"github.com/dinailman/personalized-notification-engine/internal/database"
-	"github.com/dinailman/personalized-notification-engine/internal/queue"
-	"github.com/dinailman/personalized-notification-engine/internal/repositories"
-	"github.com/dinailman/personalized-notification-engine/internal/scheduler"
-	"github.com/dinailman/personalized-notification-engine/internal/sender"
-	"github.com/dinailman/personalized-notification-engine/internal/worker"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/dinailman/notification-engine-personalized/internal/config"
+	"github.com/dinailman/notification-engine-personalized/internal/database"
+	"github.com/dinailman/notification-engine-personalized/internal/queue"
+	"github.com/dinailman/notification-engine-personalized/internal/repositories"
+	"github.com/dinailman/notification-engine-personalized/internal/scheduler"
+	"github.com/dinailman/notification-engine-personalized/internal/sender"
+	"github.com/dinailman/notification-engine-personalized/internal/worker"
 )
 
 func main() {

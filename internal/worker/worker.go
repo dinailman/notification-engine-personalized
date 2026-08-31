@@ -2,13 +2,14 @@ package worker
 
 import (
 	"context"
-	"github.com/dinailman/personalized-notification-engine/internal/models"
-	"github.com/dinailman/personalized-notification-engine/internal/queue"
-	"github.com/dinailman/personalized-notification-engine/internal/repositories"
-	"github.com/dinailman/personalized-notification-engine/internal/sender"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/dinailman/notification-engine-personalized/internal/models"
+	"github.com/dinailman/notification-engine-personalized/internal/queue"
+	"github.com/dinailman/notification-engine-personalized/internal/repositories"
+	"github.com/dinailman/notification-engine-personalized/internal/sender"
 )
 
 type Worker struct {

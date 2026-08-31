@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dinailman/personalized-notification-engine/internal/models"
-	"github.com/dinailman/personalized-notification-engine/internal/repositories"
+	"github.com/dinailman/notification-engine-personalized/internal/models"
+	"github.com/dinailman/notification-engine-personalized/internal/repositories"
 )
 
 // jakarta is UTC+7 year round, so a local wall clock built here never lands on a DST

@@ -1,4 +1,4 @@
-module github.com/dinailman/personalized-notification-engine
+module github.com/dinailman/notification-engine-personalized
 
 go 1.23
 

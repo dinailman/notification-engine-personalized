@@ -2,10 +2,11 @@ package scheduler
 
 import (
 	"context"
-	"github.com/dinailman/personalized-notification-engine/internal/queue"
-	"github.com/dinailman/personalized-notification-engine/internal/repositories"
 	"log/slog"
 	"time"
+
+	"github.com/dinailman/notification-engine-personalized/internal/queue"
+	"github.com/dinailman/notification-engine-personalized/internal/repositories"
 )
 
 type Scheduler struct {

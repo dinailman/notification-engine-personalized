@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dinailman/personalized-notification-engine/internal/config"
-	"github.com/dinailman/personalized-notification-engine/internal/database"
-	"github.com/dinailman/personalized-notification-engine/internal/handlers"
-	"github.com/dinailman/personalized-notification-engine/internal/queue"
-	"github.com/dinailman/personalized-notification-engine/internal/repositories"
+	"github.com/dinailman/notification-engine-personalized/internal/config"
+	"github.com/dinailman/notification-engine-personalized/internal/database"
+	"github.com/dinailman/notification-engine-personalized/internal/handlers"
+	"github.com/dinailman/notification-engine-personalized/internal/queue"
+	"github.com/dinailman/notification-engine-personalized/internal/repositories"
 )
 
 func main() {

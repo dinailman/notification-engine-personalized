@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dinailman/personalized-notification-engine/internal/models"
-	"github.com/dinailman/personalized-notification-engine/internal/rules"
+	"github.com/dinailman/notification-engine-personalized/internal/models"
+	"github.com/dinailman/notification-engine-personalized/internal/rules"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
