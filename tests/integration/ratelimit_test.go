@@ -17,6 +17,9 @@ func rateQueue(t *testing.T) (*queue.Queue, *redis.Client) {
 	t.Helper()
 	addr := os.Getenv("TEST_REDIS_ADDR")
 	if addr == "" {
+		if os.Getenv("CI") != "" {
+			t.Fatal("TEST_REDIS_ADDR is unset under CI, so these tests would skip and report success")
+		}
 		t.Skip("set TEST_REDIS_ADDR to run rate limiter tests")
 	}
 	client := redis.NewClient(&redis.Options{Addr: addr})

@@ -28,6 +28,12 @@ var pool *pgxpool.Pool
 func TestMain(m *testing.M) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
+		// Skipping is right on a laptop with no database, but under CI it is the failure
+		// this suite is meant to catch: a green run that tested nothing. CI must configure
+		// the service or hear about it.
+		if os.Getenv("CI") != "" {
+			panic("TEST_DATABASE_URL is unset under CI, so the integration suite would skip and report success")
+		}
 		os.Exit(m.Run())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

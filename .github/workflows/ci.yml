@@ -8,6 +8,29 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # The integration tests skip themselves without these, so without the services they
+    # would pass by never running. Images match docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: notifications_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d notifications_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,4 +43,9 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - name: go test -race
+        # notifications_test is the throwaway database the suite drops and re-migrates.
+        # tests/e2e stays out: it drives a running API over HTTP and needs the full stack.
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/notifications_test?sslmode=disable
+          TEST_REDIS_ADDR: localhost:6379
         run: go test -race $(go list ./... | grep -v '/tests/e2e')
