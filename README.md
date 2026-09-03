@@ -1,6 +1,6 @@
-# Personalized Notification Engine
-
 [![CI](https://github.com/dinailman/notification-engine-personalized/actions/workflows/ci.yml/badge.svg)](https://github.com/dinailman/notification-engine-personalized/actions/workflows/ci.yml)
+
+# Personalized Notification Engine
 
 Production-style Go notification service that personalizes user engagement messages for SaaS and marketplace products.
 
@@ -19,6 +19,18 @@ Worker -> Redis queue -> mock sender -> notification status + attempt log
 ```
 
 Redis carries notification IDs rather than full payloads. PostgreSQL owns users, preferences, rules, events, notification state, and audit logs. This keeps retries inspectable and makes duplicate event ingestion safe.
+
+## Proof: duplicate events under concurrency
+
+A provider retries a webhook, or two callbacks arrive together, and the user is notified twice for one real event.
+
+Ingestion is keyed on a caller-supplied `external_id`. The guarantee is enforced by PostgreSQL, not by application logic: `migrations/001_init.sql` declares the column `external_id TEXT UNIQUE`, and the insert in `CreateEvent` is `ON CONFLICT (external_id) DO NOTHING`, so a losing caller blocks until the winner commits, then resolves the existing event instead of matching rules a second time.
+
+`TestConcurrentIngestCreatesOneNotification` in `tests/integration` releases 50 goroutines from one channel to ingest a single `external_id` against a throwaway database, and asserts that every caller resolves to the same event, that exactly one caller reports creating a notification, that the user holds one notification, and that `count(*)` on `events` for that `external_id` is 1.
+
+```bash
+TEST_DATABASE_URL='postgres://postgres:postgres@localhost:15435/notifications_test?sslmode=disable' go test ./tests/integration -run TestConcurrentIngestCreatesOneNotification -v
+```
 
 ## Features
 
